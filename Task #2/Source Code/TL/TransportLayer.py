@@ -14,7 +14,7 @@ class RDT:
     def __init__(self):
         self.MSS = 2048
         self.N = 100  # Window size.
-        self.RTO = 0.1  # Timeout (secs).
+        self.RTO = 2  # Timeout (secs).
         self.connection = False
         self.ACK = {}
         self.lock = threading.Lock()
@@ -104,11 +104,11 @@ class Packet(RDT):
             while byte:
                 self.seqnum = (str(seqcount) + ";").encode('utf-8')
                 data.append(self.SYN + self.FIN + self.seqnum + byte)
-                self.header_size = sys.getsizeof(self.SYN + self.FIN + self.seqnum)
+                #self.header_size = sys.getsizeof(self.SYN + self.FIN + self.seqnum)
                 byte = ifile.read(self.MSS - self.header_size)
                 seqcount += 1
             ifile.close()
             return data
         else:
-            self.seqnum = b"0"
+            #self.seqnum = b"0"
             return self.SYN + self.FIN + self.seqnum
