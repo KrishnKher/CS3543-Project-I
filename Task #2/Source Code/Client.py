@@ -1,6 +1,7 @@
 import TL.ApplicationLayer as AL
 import socket
-
+import time
+import os
 
 input_filename = r"CS3543_100MB"
 
@@ -21,10 +22,17 @@ client_address = (client_IP, client_port)
 send_socket.connect(server_address) # Client connects to the server.
 receive_socket.bind(client_address) # Client socket up for receiving ACKs.
 
-ftpclient = AL.App_Interface()
+#ftpclient = AL.App_Interface()
+ftpclient = AL.TCPML()
 ftpclient.sendSYN(send_socket, receive_socket, server_address)
+start = time.time()
+#ftpclient.send(send_socket, input_filename, server_address, receive_socket)
 ftpclient.send(send_socket, input_filename, server_address, receive_socket)
+end = time.time()
 ftpclient.close_conn(send_socket, receive_socket, server_address)
+
+print("Time taken to transfer the file: " + str(end - start))
+print("Throughtput is: " + str(os.path.getsize(input_filename)/(end - start)))
 
 '''
 any flags to be handled here
