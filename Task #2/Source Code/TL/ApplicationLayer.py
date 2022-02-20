@@ -14,6 +14,7 @@ class App_Interface(tl.RDT):
         packets = tl.Packet()
         data = packets.prepare(filename)
         datasize = len(data)
+        print(datasize)
         t = threading.Thread(target=self.receive_ack, args=(datasize, r, ))
         t.start()
         threads = {}
@@ -25,14 +26,14 @@ class App_Interface(tl.RDT):
                 self.ACK[nextseq] = False
                 sskt.sendto(pkt, r_addr)
                 self.lock.release()
-
+                
                 threads[nextseq] = threading.Thread(target=self.timer, args=(sskt, pkt, r_addr, nextseq))
                 threads[nextseq].start()
                 nextseq += 1
             while not self.ACK[base]:
                 pass
             #self.ACK.pop(base)
-            threads[nextseq].join()
+            threads[base].join()
             base += 1
         t.join()
         return
@@ -46,9 +47,11 @@ class App_Interface(tl.RDT):
             #SYN, FIN, seqnum, _ = pkt[0].split(b';')
             seqnum = pkt[0].split(b';')[2]
             seqnum = int(seqnum)
+            #print("Recieved not yet: " + str(seqnum))
             # check if the ack is within or lower than the window
             # if(seqnum < max(ACK.keys())):
             if self.ACK[seqnum] is False:
+                #print("Recieved " + str(seqnum))
                 self.ACK[seqnum] = True
                 true_count += 1
         return
@@ -61,6 +64,7 @@ class App_Interface(tl.RDT):
             # Sends a thanking message to the client (encoding to send via a byte-stream).
             #print("Less GOOO")
             ack = rskt.recvfrom(self.MSS)
+            start = time.time()
             #print(ack)
             #print("Less GOOO 2")
             #print(ack)
@@ -87,6 +91,8 @@ class App_Interface(tl.RDT):
                 print(ack[0])
                 rskt.sendto(ack[0], clt_send_addr)
 
+            end = time.time()
+            #print("Time taken = " + str(end - start))
         print("Server in passive state.")
         rskt.close()
         return buffer# ??
@@ -102,6 +108,7 @@ class App_Interface(tl.RDT):
             self.ssthresh = self.cwnd/2
             self.cwnd = self.MSS
             self.congested = self.SLOW_START
+            print("Timeout for " + str(seqnum))
             sskt.sendto(pkt, addr)  # Retransmission in case of timeout.
             self.lock.release()
 
@@ -127,25 +134,31 @@ class TCPML(App_Interface):
 
         receiving_thread = threading.Thread(target=self.receive_ack, args=(datasize, r, sskt))
         receiving_thread.start()
-        while True:
-
+        
+        for i in range(0, datasize):
+            self.ACK[i] = 0
+        
+        while self.next_seq != datasize:
+            self.ACK[self.next_seq] = 0
             if self.start_time == 0:
                 timer_thread = threading.Thread(target=self.timer, args=(sskt, data[self.base], r_addr))
                 timer_thread.start()
 
-            while self.next_seq != datasize:
-                while self.next_seq - self.base + 1 <= self.cwnd/self.MSS:
-                    self.lock.acquire()
-                    self.ACK[self.next_seq] = 0
-                    self.timestamp[self.next_seq] = time.time()
-                    sskt.sendto(data[self.next_seq], r_addr)
-                    self.lock.release()
-
-                    self.next_seq += 1
+            while self.next_seq - self.base + 1 <= self.cwnd/self.MSS:
+                self.lock.acquire()
+                self.timestamp[self.next_seq] = time.time()
+                print("Sending: " + str(self.next_seq))
+                sskt.sendto(data[self.next_seq], r_addr)
+                self.next_seq += 1
+                self.lock.release()
+                
+        
+        #timer_thread.join()
 
     def send_ack(self, rskt, clt_send_addr):  # To be run by the server.
         buffer = {}
         wanted_seq_num = 0
+        FIN = 0
 
         while FIN != 1:
             # Sends a thanking message to the client (encoding to send via a byte-stream).
@@ -187,18 +200,21 @@ class TCPML(App_Interface):
             #SYN, FIN, seqnum,_ = pkt[0].split(b';')
             seqnum = pkt[0].split(b';')[2]
             seqnum = int(seqnum)
+            print("Recieved yet to be : " + str(seqnum))
             # check if the ack is within or lower than the window
             # if(seqnum < max(ACK.keys())):
+            print(seqnum, self.base , sep = "   ")
             if seqnum > self.base:
                 self.lock.acquire()
-                sample_rtt = curr_time - self.timestamp[seqnum]
+                sample_rtt = curr_time - self.timestamp[seqnum-1]
                 self.estimated_rtt = (1-self.alpha)*self.estimated_rtt + self.alpha*sample_rtt
                 self.dev_rtt = (1-self.beta)*self.dev_rtt + self.beta*abs(sample_rtt-self.estimated_rtt)
                 self.RTO = self.estimated_rtt + 4*self.dev_rtt
                 for index in range(self.base, seqnum):
-                    if not self.ACK[index]:
+                    if self.ACK[index] == 0:
                         true_count += 1
                     self.ACK[index] += 1
+                    print(index, self.ACK[index], sep = " |||  ")
                 self.base = seqnum
 
                 if self.base == self.next_seq:
@@ -217,8 +233,9 @@ class TCPML(App_Interface):
                 self.lock.release()
             else:
                 assert(seqnum == self.base)
+                print("Here " + str(seqnum))
                 self.ACK[seqnum] += 1
-
+                print()
                 if self.ACK[seqnum] == 3:
                     self.lock.acquire()
                     sskt.sendto(pkt, r)
@@ -232,6 +249,7 @@ class TCPML(App_Interface):
         self.start_time = time.time()
         while True:
             # start = curr
+            self.start_time = time.time()
             while time.time() - self.start_time < self.RTO:
                 if self.ACK[self.base]:
                     return
@@ -241,5 +259,5 @@ class TCPML(App_Interface):
             self.congested = self.SLOW_START
             self.RTO = self.RTO*2
             sskt.sendto(pkt, addr)  # Retransmission in case of timeout.
-            self.start_time = time.time()
+            self.start_time = 0
             self.lock.release()
